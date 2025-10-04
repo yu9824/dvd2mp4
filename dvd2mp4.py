@@ -1,29 +1,56 @@
 #!/usr/bin/env python3
 import argparse
+import glob
 import os
-import sys
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
-import glob
-import re
 from collections import defaultdict
 
+
 def run_command(cmd, verbose=False, capture_output=False):
+    """
+    コマンド実行を制御
+    - verbose=True: 出力をターミナルに流す（ffmpeg/ffprobe のログが見える）
+        - capture_output=True の場合は stdout だけPythonに取り込む
+    - verbose=False: 出力抑制、エラー時のみ stderr 表示
+    """
     if verbose:
         print("▶", " ".join(cmd))
-    try:
-        result = subprocess.run(
-            cmd, check=True,
-            capture_output=capture_output,
-            text=True
-        )
-        return result.stdout if capture_output else None
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Command failed: {' '.join(cmd)}", file=sys.stderr)
-        if e.stderr:
-            print(e.stderr, file=sys.stderr)
-        sys.exit(1)
+        if capture_output:
+            result = subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=sys.stderr,
+                text=True,
+            )
+            return result.stdout
+        else:
+            subprocess.run(cmd, check=True)
+            return None
+    else:
+        try:
+            result = subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.PIPE
+                if capture_output
+                else subprocess.DEVNULL,
+                stderr=subprocess.PIPE
+                if capture_output
+                else subprocess.DEVNULL,
+                text=True,
+            )
+            return result.stdout if capture_output else None
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Command failed: {' '.join(cmd)}", file=sys.stderr)
+            if e.stderr:
+                print(e.stderr, file=sys.stderr)
+            sys.exit(1)
+
 
 def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
     """VOBファイルを結合し、音声ストリームを選んでMP4に変換"""
@@ -39,60 +66,102 @@ def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
 
         # 音声ストリーム取得
         ffprobe_cmd = [
-            "ffprobe", "-v", "error",
-            "-select_streams", "a",
-            "-show_entries", "stream=index",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            concat_vob
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            concat_vob,
         ]
-        audio_streams = run_command(ffprobe_cmd, verbose=verbose, capture_output=True).strip().splitlines()
+        audio_streams = run_command(
+            ffprobe_cmd, verbose=verbose, capture_output=True
+        )
         if not audio_streams:
-            print(f"❌ No audio streams found in {concat_vob}", file=sys.stderr)
+            print(
+                f"❌ No audio streams found in {concat_vob}", file=sys.stderr
+            )
             return
-        audio_stream = audio_streams[0]
+        audio_stream = audio_streams.strip().splitlines()[0]
         if verbose:
             print(f"🔊 Using audio stream: {audio_stream}")
 
         # ffmpeg変換
         ffmpeg_cmd = [
-            "ffmpeg", "-y", "-i", concat_vob,
-            "-map", "0:v:0", "-map", f"0:{audio_stream}",
-            "-c:v", "libx264", "-c:a", "aac", "-b:a", "192k",
-            "-movflags", "+faststart",
-            output_file
+            "ffmpeg",
+            "-y",
+            "-i",
+            concat_vob,
+            "-map",
+            "0:v:0",
+            "-map",
+            f"0:{audio_stream}",
+            "-c:v",
+            "libx264",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            output_file,
         ]
         run_command(ffmpeg_cmd, verbose=verbose)
         if verbose:
             print(f"✅ Created {output_file}")
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Convert DVD VOB files to MP4 using ffmpeg"
     )
-    parser.add_argument("-i", "--input", required=True,
-                        help="Path to DVD structure directory containing VTS_??_*.VOB files")
-    parser.add_argument("-o", "--output",
-                        help="Output MP4 filename (default: <input_dirname>.mp4)")
-    parser.add_argument("-s", "--split", action="store_true",
-                        help="Split by VTS prefix (generate multiple MP4 files)")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="Enable verbose logging")
+    parser.add_argument(
+        "-i",
+        "--input",
+        required=True,
+        help="Path to DVD structure directory containing VTS_??_*.VOB files",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        help="Output MP4 filename (default: <input_dirname>.mp4)",
+    )
+    parser.add_argument(
+        "-s",
+        "--split",
+        action="store_true",
+        help="Split by VTS prefix (generate multiple MP4 files)",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose logging"
+    )
     args = parser.parse_args()
 
     # ffmpeg / ffprobe check
     for tool in ("ffmpeg", "ffprobe"):
         if shutil.which(tool) is None:
-            print(f"Error: {tool} not found in PATH. Please install it.", file=sys.stderr)
+            print(
+                f"Error: {tool} not found in PATH. Please install it.",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
     input_dir = os.path.abspath(args.input)
     if not os.path.isdir(input_dir):
-        print(f"Error: input directory not found: {input_dir}", file=sys.stderr)
+        print(
+            f"Error: input directory not found: {input_dir}", file=sys.stderr
+        )
         sys.exit(1)
 
     vob_files = sorted(glob.glob(os.path.join(input_dir, "VTS_??_*.VOB")))
     if not vob_files:
-        print(f"Error: no VTS_??_*.VOB files found in {input_dir}", file=sys.stderr)
+        print(
+            f"Error: no VTS_??_*.VOB files found in {input_dir}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     if args.split:
@@ -123,6 +192,7 @@ def main():
             print(f"💾 Output: {output_file}")
 
         convert_vobs_to_mp4(vob_files, output_file, verbose=args.verbose)
+
 
 if __name__ == "__main__":
     main()
