@@ -1,0 +1,11 @@
+# Ignore DVD-related files
+*.iso
+*.img
+*.dvd
+*.vob
+*.ifo
+*.bup
+VIDEO_TS/
+AUDIO_TS/
+
+*.mp4
