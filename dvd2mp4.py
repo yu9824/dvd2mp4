@@ -145,7 +145,7 @@ def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
                     shutil.copyfileobj(infile, outfile)
 
         # 音声ストリーム取得
-        ffprobe_cmd = [
+        ffprobe_audio = [
             "ffprobe",
             "-v",
             "error",
@@ -158,7 +158,7 @@ def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
             concat_vob,
         ]
         audio_streams = run_command(
-            ffprobe_cmd, verbose=verbose, capture_output=True
+            ffprobe_audio, verbose=verbose, capture_output=True
         )
         if not audio_streams:
             print(
@@ -168,6 +168,24 @@ def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
         audio_stream = audio_streams.strip().splitlines()[0]
         if verbose:
             print(f"🔊 Using audio stream: {audio_stream}")
+
+        # アスペクト比取得
+        ffprobe_video = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=display_aspect_ratio",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            concat_vob,
+        ]
+        dar = run_command(ffprobe_video, verbose=verbose, capture_output=True)
+        dar = dar.strip() if dar else None
+        if verbose and dar:
+            print(f"📐 Detected aspect ratio: {dar}")
 
         # ffmpeg変換
         ffmpeg_cmd = [
@@ -187,9 +205,13 @@ def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
             "192k",
             "-movflags",
             "+faststart",
-            output_file,
         ]
+        if dar:
+            ffmpeg_cmd += ["-aspect", dar]
+
+        ffmpeg_cmd.append(output_file)
         run_command(ffmpeg_cmd, verbose=verbose)
+
         if verbose:
             print(f"✅ Created {output_file}")
 
