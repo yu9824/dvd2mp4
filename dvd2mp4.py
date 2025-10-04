@@ -1,4 +1,31 @@
 #!/usr/bin/env python3
+"""dvd2mp4
+
+Utilities to convert DVD VOB files (VIDEO_TS/VTS_*.VOB) into MP4 using
+ffmpeg/ffprobe.
+
+This module provides a small CLI (``main``) and helper functions to:
+
+- run shell commands safely with optional output capture and verbose logging
+- concatenate multiple VOB files into a temporary container
+- select an audio stream and transcode the video/audio into an MP4 file
+
+Requirements
+----------
+ffmpeg, ffprobe : executables available on PATH
+
+Examples
+--------
+Convert a DVD folder into a single MP4:
+
+    python dvd2mp4.py -i /path/to/VIDEO_TS
+
+Split by VTS prefix and create multiple MP4s:
+
+    python dvd2mp4.py -i /path/to/VIDEO_TS -s
+
+"""
+
 import argparse
 import glob
 import os
@@ -11,11 +38,37 @@ from collections import defaultdict
 
 
 def run_command(cmd, verbose=False, capture_output=False):
-    """
-    コマンド実行を制御
-    - verbose=True: 出力をターミナルに流す（ffmpeg/ffprobe のログが見える）
-        - capture_output=True の場合は stdout だけPythonに取り込む
-    - verbose=False: 出力抑制、エラー時のみ stderr 表示
+    """Run a shell command with optional capture and verbose logging.
+
+    This is a thin wrapper around :func:`subprocess.run` that normalizes
+    behavior for the rest of the module. When ``verbose`` is True the
+    command is printed to stdout and ffmpeg/ffprobe log messages are
+    streamed to the terminal. When ``capture_output`` is True the
+    function will return the command's standard output as a string;
+    otherwise it returns ``None`` on success.
+
+    Parameters
+    ----------
+    cmd : sequence
+        Command to execute (list or tuple of program and arguments).
+    verbose : bool, optional
+        If True, print the command and stream subprocess output to the
+        terminal. Default is False.
+    capture_output : bool, optional
+        If True, capture and return stdout as a text string. Default is
+        False.
+
+    Returns
+    -------
+    str or None
+        Captured stdout when ``capture_output`` is True, otherwise
+        ``None``.
+
+    Raises
+    ------
+    SystemExit
+        Exits with code 1 if the subprocess returns a non-zero exit
+        status.
     """
     if verbose:
         print("▶", " ".join(cmd))
@@ -53,7 +106,34 @@ def run_command(cmd, verbose=False, capture_output=False):
 
 
 def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
-    """VOBファイルを結合し、音声ストリームを選んでMP4に変換"""
+    """Concatenate VOB files and transcode them to an MP4 file.
+
+    The function concatenates the provided VOB files into a single
+    temporary file, probes available audio streams using ``ffprobe``,
+    and then runs ``ffmpeg`` to transcode the video to H.264 and audio
+    to AAC. The first audio stream found is used.
+
+    Parameters
+    ----------
+    vob_files : list of str
+        Ordered list of VOB file paths to concatenate and transcode.
+    output_file : str
+        Path to write the resulting MP4 file. If a file exists it will
+        be overwritten.
+    verbose : bool, optional
+        If True, print progress messages and ffmpeg/ffprobe commands.
+        Default is False.
+
+    Notes
+    -----
+    - Requires ``ffmpeg`` and ``ffprobe`` to be available in PATH.
+    - Uses a temporary directory to store the concatenated VOB prior
+      to transcoding; temporary files are removed automatically.
+
+    Examples
+    --------
+    >>> convert_vobs_to_mp4(["VTS_01_1.VOB", "VTS_01_2.VOB"], "out.mp4")
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         concat_vob = os.path.join(tmpdir, "concat.VOB")
         # VOB結合
@@ -115,6 +195,24 @@ def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
 
 
 def main():
+    """Command line entry point.
+
+    Parses command line arguments and invokes conversion routines. When
+    invoked as a script this function performs basic validation of the
+    input directory and presence of external tools, and either creates
+    a single combined MP4 or multiple MP4s split by VTS prefix.
+
+    Command line options
+    --------------------
+    - ``-i/--input`` : path to the DVD folder containing VTS_*.VOB files
+    - ``-o/--output`` : output filename for single-file mode
+    - ``-s/--split`` : split into separate MP4 files per VTS prefix
+    - ``-v/--verbose`` : enable verbose logging
+
+    Returns
+    -------
+    None
+    """
     parser = argparse.ArgumentParser(
         description="Convert DVD VOB files to MP4 using ffmpeg"
     )
