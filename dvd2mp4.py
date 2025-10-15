@@ -105,7 +105,7 @@ def run_command(cmd, verbose=False, capture_output=False):
             sys.exit(1)
 
 
-def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
+def convert_vobs_to_mp4(vob_files, output_file, verbose=False, aspect=None):
     """Concatenate VOB files and transcode them to an MP4 file.
 
     The function concatenates the provided VOB files into a single
@@ -123,6 +123,10 @@ def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
     verbose : bool, optional
         If True, print progress messages and ffmpeg/ffprobe commands.
         Default is False.
+    aspect : str or None, optional
+        Manually specify an output aspect ratio (e.g. "16:9" or "4:3").
+        When None the function will attempt to autodetect the aspect
+        ratio using ffprobe.
 
     Notes
     -----
@@ -169,23 +173,31 @@ def convert_vobs_to_mp4(vob_files, output_file, verbose=False):
         if verbose:
             print(f"🔊 Using audio stream: {audio_stream}")
 
-        # アスペクト比取得
-        ffprobe_video = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=display_aspect_ratio",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            concat_vob,
-        ]
-        dar = run_command(ffprobe_video, verbose=verbose, capture_output=True)
-        dar = dar.strip() if dar else None
-        if verbose and dar:
-            print(f"📐 Detected aspect ratio: {dar}")
+        # アスペクト比: ユーザー指定があればそれを使い、なければ ffprobe で自動検出
+        dar = None
+        if aspect:
+            dar = aspect
+            if verbose:
+                print(f"📐 Using user-specified aspect ratio: {dar}")
+        else:
+            ffprobe_video = [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=display_aspect_ratio",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                concat_vob,
+            ]
+            dar = run_command(
+                ffprobe_video, verbose=verbose, capture_output=True
+            )
+            dar = dar.strip() if dar else None
+            if verbose and dar:
+                print(f"📐 Detected aspect ratio: {dar}")
 
         # ffmpeg変換
         ffmpeg_cmd = [
@@ -258,6 +270,14 @@ def main():
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose logging"
     )
+    parser.add_argument(
+        "-a",
+        "--aspect",
+        help=(
+            "Manually specify output aspect ratio (e.g. 16:9 or 4:3). "
+            "If omitted the script will attempt to autodetect via ffprobe."
+        ),
+    )
     args = parser.parse_args()
 
     # ffmpeg / ffprobe check
@@ -297,7 +317,9 @@ def main():
             output_file = f"{prefix}.mp4"
             if args.verbose:
                 print(f"📼 Processing group: {prefix} → {output_file}")
-            convert_vobs_to_mp4(files, output_file, verbose=args.verbose)
+            convert_vobs_to_mp4(
+                files, output_file, verbose=args.verbose, aspect=args.aspect
+            )
 
     else:
         # すべて結合して1つのmp4
@@ -311,7 +333,9 @@ def main():
             print(f"📼 VOB files: {len(vob_files)} found")
             print(f"💾 Output: {output_file}")
 
-        convert_vobs_to_mp4(vob_files, output_file, verbose=args.verbose)
+        convert_vobs_to_mp4(
+            vob_files, output_file, verbose=args.verbose, aspect=args.aspect
+        )
 
 
 if __name__ == "__main__":
